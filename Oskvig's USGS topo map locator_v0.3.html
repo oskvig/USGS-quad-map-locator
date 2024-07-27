@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Oskvig's USGS quad map locator</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 10px;
+            font-size: 20px;
+        }
+        .heading {
+            font-size: 2em;
+            font-weight: bold;
+            text-decoration: underline;
+        }
+        .subheading {
+            font-size: 1.5em;
+            font-weight: bold;
+        }
+        .caption {
+            font-size: 0.9em;
+            color: grey;
+        }
+        .form-group {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .form-group label {
+            font-size: 1.2em;
+        }
+        .form-group input {
+            margin-left: 5px;
+            margin-right: 10px;
+            font-size: 1.5em;
+            width: auto;
+        }
+        .form-group button {
+            font-size: 1.3em;
+            margin-top: 10px;
+        }
+        .map-result {
+            font-size: 1.3em;
+        }
+        .centered {
+            text-align: center;
+            margin: 20px 0;
+            font-size: 2.5em;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <h1>Oskvig's USGS quad map locator</h1>
+    
+    <div class="subheading">Decimal degrees (DD)</div>
+    <div class="caption">e.g. 40.348644, -74.658419</div>
+    <form id="coordFormDD" onsubmit="event.preventDefault(); getQuadMapDD();">
+        <div class="form-group" style="padding-left: 20px;">
+            <input type="text" id="coordinatesDD" name="coordinatesDD" style="width: 10em;">
+            <button type="button" onclick="getQuadMapDD()" style="font-size: 1em;">Get maps</button>
+        </div>
+    </form>
+    
+    <div style="font-size: 2.5em; font-style: italic; margin: 20px 0; padding-left: 150px;">OR</div>
+    
+    <div class="subheading">Degrees decimal minutes (DDM)</div>
+    <div class="caption">e.g. 40°20.897700, -74°39.499020</div>
+    <form id="coordFormDDM" onsubmit="event.preventDefault(); getQuadMapDDM();">
+        <div class="form-group" style="padding-left: 20px;">
+            <label for="latitudeDeg" class="subsection">Latitude</label>
+        </div>
+        <div class="form-group" style="padding-left: 40px;">
+            <label for="latitudeDeg" style="font-size: 1em;">Degrees: </label>
+            <input type="text" id="latitudeDeg" name="latitudeDeg" style="width: 3em;">
+        </div>
+        <div class="form-group" style="padding-left: 40px;">
+            <label for="latitudeMin" style="font-size: 1em;">Minutes: </label>
+            <input type="text" id="latitudeMin" name="latitudeMin" step="0.00001" style="width: 6em;">
+        </div>
+        <div class="form-group" style="padding-left: 20px;">
+            <label for="longitudeDeg" class="subsection">Longitude</label>
+        </div>
+        <div class="form-group" style="padding-left: 40px;">
+            <label for="longitudeDeg" style="font-size: 1em;">Degrees: </label>
+            <input type="text" id="longitudeDeg" name="longitudeDeg" style="width: 3em;">
+        </div>
+        <div class="form-group" style="padding-left: 40px;">
+            <label for="longitudeMin" style="font-size: 1em;">Minutes: </label>
+            <input type="text" id="longitudeMin" name="longitudeMin" step="0.00001" style="width: 6em;">
+            <button type="button" onclick="getQuadMapDDM()" style="font-size: 1em; margin-left: 10px;">Get maps</button>
+        </div>
+    </form>
+
+    <p id="result"></p>
+    <pre id="debug"></pre>
+
+<script>
+    function cleanInput(input) {
+        return input.replace(/[-°NSEW\s]/g, '');
+    }
+
+    function parseCoordinatesDD() {
+        let ddInput = document.getElementById('coordinatesDD').value.trim();
+        ddInput = cleanInput(ddInput);
+        const ddRegex = /^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/;
+
+        if (ddRegex.test(ddInput)) {
+            const [lat, lon] = ddInput.split(',').map(Number);
+            return { lat, lon: -Math.abs(lon) };
+        } else {
+            throw new Error('Invalid coordinate format. Please enter coordinates in DD format.');
+        }
+    }
+
+    function parseCoordinatesDDM() {
+        let latitudeDeg = document.getElementById('latitudeDeg').value.trim();
+        let latitudeMin = document.getElementById('latitudeMin').value.trim();
+        let longitudeDeg = document.getElementById('longitudeDeg').value.trim();
+        let longitudeMin = document.getElementById('longitudeMin').value.trim();
+
+        latitudeDeg = cleanInput(latitudeDeg);
+        latitudeMin = cleanInput(latitudeMin);
+        longitudeDeg = cleanInput(longitudeDeg);
+        longitudeMin = cleanInput(longitudeMin);
+
+        latitudeDeg = parseFloat(latitudeDeg);
+        latitudeMin = parseFloat(latitudeMin);
+        longitudeDeg = parseFloat(longitudeDeg);
+        longitudeMin = parseFloat(longitudeMin);
+
+        if (!isNaN(latitudeDeg) && !isNaN(latitudeMin) && !isNaN(longitudeDeg) && !isNaN(longitudeMin)) {
+            const lat = latitudeDeg + (latitudeMin / 60);
+            const lon = -(longitudeDeg + (longitudeMin / 60));
+            return { lat, lon };
+        } else {
+            throw new Error('Invalid coordinate format. Please enter coordinates in DDM format.');
+        }
+    }
+
+    function truncateToThreeDecimals(value) {
+        return Math.floor(value * 1000) / 1000;
+    }
+
+    function roundUpToThreeDecimals(value) {
+        return Math.ceil(value * 1000) / 1000;
+    }
+
+    function createMainBoundingBox(lat, lon) {
+        const minLat = truncateToThreeDecimals(lat);
+        const minLon = truncateToThreeDecimals(lon);
+        const maxLat = roundUpToThreeDecimals(lat + 0.001); // Small offset to create a valid bounding box
+        const maxLon = roundUpToThreeDecimals(lon + 0.001); // Small offset to create a valid bounding box
+        return { minLat, maxLat, minLon, maxLon };
+    }
+
+    function createAdjoiningBoundingBoxes(lat, lon) {
+        const baseLat = truncateToThreeDecimals(lat);
+        const baseLon = truncateToThreeDecimals(lon);
+        const shift = 0.125; // 7.5 minutes in degrees
+
+        return {
+            'Northwest': createMainBoundingBox(baseLat + shift, baseLon - shift),
+            'North': createMainBoundingBox(baseLat + shift, baseLon),
+            'Northeast': createMainBoundingBox(baseLat + shift, baseLon + shift),
+            'West': createMainBoundingBox(baseLat, baseLon - shift),
+            'Center': createMainBoundingBox(baseLat, baseLon),
+            'East': createMainBoundingBox(baseLat, baseLon + shift),
+            'Southwest': createMainBoundingBox(baseLat - shift, baseLon - shift),
+            'South': createMainBoundingBox(baseLat - shift, baseLon),
+            'Southeast': createMainBoundingBox(baseLat - shift, baseLon + shift),
+        };
+    }
+
+    async function getQuadMapDD() {
+        try {
+            const { lat, lon } = parseCoordinatesDD();
+            console.log(`Converted coordinates: ${lat}, ${lon}`);
+            await fetchQuadMaps(lat, lon);
+        } catch (error) {
+            console.error('Error:', error);
+            document.getElementById('result').innerText = 'Error fetching data from USGS API or invalid coordinate format.';
+            document.getElementById('debug').innerText += `\n\nError: ${error.message}`;
+        }
+    }
+
+    async function getQuadMapDDM() {
+        try {
+            const { lat, lon } = parseCoordinatesDDM();
+            console.log(`Converted coordinates: ${lat}, ${lon}`);
+            await fetchQuadMaps(lat, lon);
+        } catch (error) {
+            console.error('Error:', error);
+            document.getElementById('result').innerText = 'Error fetching data from USGS API or invalid coordinate format.';
+            document.getElementById('debug').innerText += `\n\nError: ${error.message}`;
+        }
+    }
+
+    async function fetchQuadMaps(lat, lon) {
+        const boundingBoxes = createAdjoiningBoundingBoxes(lat, lon);
+        let mainMapResult = '';
+        let adjacentMapsResult = '';
+
+        document.getElementById('debug').innerText = ''; // Clear previous debug information
+
+        for (const [direction, bbox] of Object.entries(boundingBoxes)) {
+            const apiUrl = `https://tnmaccess.nationalmap.gov/api/v1/products?bbox=${bbox.minLon},${bbox.minLat},${bbox.maxLon},${bbox.maxLat}&datasets=US%20Topo%20Current&prodFormats=&prodExtents=`;
+
+            console.log(`Requesting: ${apiUrl}`);
+
+            const response = await fetch(apiUrl);
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            const data = await response.json();
+
+            // Print the response status and data for debugging
+            document.getElementById('debug').innerText += `\n\nRequest URL: ${apiUrl}\nResponse Status: ${response.status}\nResponse Data: ${JSON.stringify(data, null, 2)}`;
+
+            if (data.items && data.items.length > 0) {
+                const quadMap = data.items[0];
+                const mapName = quadMap.title.replace('US Topo 7.5-minute map for ', '');
+                if (direction === 'Center') {
+                    mainMapResult += `
+                        <div class="heading">Map</div>
+                        <div class="map-result"><a href="${quadMap.downloadURL}" target="_blank">${mapName}</a></div><br><br>
+                    `;
+                } else {
+                    adjacentMapsResult += `
+                        <div class="map-result"><strong>${direction}:</strong> <a href="${quadMap.downloadURL}" target="_blank">${mapName}</a></div><br>
+                    `;
+                }
+            } else if (direction === 'Center') {
+                mainMapResult += `<div class="heading">Map</div><div class="map-result">No quad map found for these coordinates.</div><br><br>`;
+            } else {
+                adjacentMapsResult += `<div class="map-result"><strong>${direction}:</strong> No adjacent quad map found.</div><br>`;
+            }
+        }
+
+        document.getElementById('result').innerHTML = `${mainMapResult}<div class="heading">Adjacent Maps</div>${adjacentMapsResult}`;
+    }
+</script>
+
+</body>
+</html>
